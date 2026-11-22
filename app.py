@@ -26,9 +26,9 @@ CLOVA_OCR_SECRET = ""    # (선택) 네이버 CLOVA OCR Secret Key
 CLAUDE_MODEL = "claude-sonnet-5-5"
 DEMO_MODE = "auto"       # "auto": 키 없으면 데모 / "on": 항상 데모 / "off": 항상 실제 API
 
-STORAGE = "session"        # "file": 내 PC에 기록 저장 / "session": 브라우저를 닫으면 사라짐 (인터넷 배포용)
+STORAGE = "session"         # "file": 내 PC에 기록 저장 / "session": 브라우저를 닫으면 사라짐 (인터넷 배포용)
 MAX_ACTIVE_RECORDS = 10  # 최근 기록으로 보여줄 개수. 넘으면 오래된 기록부터 보관함으로 이동
-ALLOW_OCR_INSTALL = False# 앱 화면에서 자동 가림(EasyOCR) 설치 버튼을 보여줄지 (인터넷 배포 버전은 False)
+ALLOW_OCR_INSTALL = False # 앱 화면에서 자동 가림(EasyOCR) 설치 버튼을 보여줄지 (인터넷 배포 버전은 False)
 
 
 # ════════════════════════════════════════════════════════════
@@ -974,6 +974,16 @@ def chat_guide(question, context, history):
 #    최근 기록은 MAX_ACTIVE_RECORDS(10)건까지, 넘으면 오래된 것부터 보관함으로 이동
 # ════════════════════════════════════════════════════════════
 import datetime as dt
+
+KST = dt.timezone(dt.timedelta(hours=9))  # 서버(클라우드)는 UTC라서 한국 시간으로 고정
+
+
+def now_kst():
+    return dt.datetime.now(KST).replace(tzinfo=None)
+
+
+def today_kst():
+    return now_kst().date()
 import sqlite3
 
 DB_PATH = Path(__file__).resolve().parent / "mediadmin_records.db"
@@ -1006,12 +1016,12 @@ def save_record(conn, receipt, analysis, explanation, created_at=None):
     t = receipt.get("totals") or {}
     visit = str(receipt.get("visit_date") or "")[:10]
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", visit):
-        visit = dt.date.today().isoformat()
+        visit = today_kst().isoformat()
     cur = conn.execute(
         """INSERT INTO records (created_at, visit_date, hospital, department, patient_type, total_cost, patient_pay,
            insurer_pay, covered_self, full_self, non_covered, items, diagnosis, explanation, archived)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
-        (created_at or dt.datetime.now().isoformat(timespec="seconds"), visit,
+        (created_at or now_kst().isoformat(timespec="seconds"), visit,
          receipt.get("hospital") or "병원 이름 미확인", receipt.get("department") or "",
          receipt.get("patient_type") or "", _int(analysis["total_cost"]), _int(analysis["patient_pay"]),
          _int(analysis["insurer_pay"]), _int(t.get("covered_self")), _int(t.get("full_self")),
@@ -1174,7 +1184,7 @@ def distance_km(lat1, lon1, lat2, lon2):
 
 def today_code(now=None):
     """국립중앙의료원 요일 코드: 1(월)~7(일)"""
-    return (now or dt.datetime.now()).weekday() + 1
+    return (now or now_kst()).weekday() + 1
 
 
 def pharmacies_near(lat, lon, rows=30, now=None):
@@ -1422,7 +1432,7 @@ def render_app():
                      on_click=go, args=(page,))
 
         html('<div class="mt-section">올해 내 진료비</div>')
-        year = str(dt.date.today().year)
+        year = str(today_kst().year)
         this_year = records_all[records_all["visit_date"].str.startswith(year)] if not records_all.empty else records_all
         c = st.columns(4)
         if this_year.empty:
@@ -1730,7 +1740,7 @@ def render_app():
                     ).properties(height=280)
                     wide(st.altair_chart, bars)
 
-            year = str(dt.date.today().year)
+            year = str(today_kst().year)
             year_self = int(records_all.loc[records_all["visit_date"].str.startswith(year), "self_covered"].sum())
             html(f'<div class="mt-note">💡 <b>{year}년 급여 본인부담금 합계는 {won(year_self)}이에요.</b> '
                  '1년 동안 낸 급여 본인부담금이 소득 수준별 상한액을 넘으면 국민건강보험공단이 넘은 금액을 돌려줘요'
@@ -1843,7 +1853,7 @@ def render_app():
 
     # ════════════════ 약국 찾기 ════════════════
     elif ss.page == "pharmacy":
-        now = dt.datetime.now()
+        now = now_kst()
         html('<div class="mt-section" style="margin-top:14px">근처 약국 찾기</div>')
         html(f'<div class="mt-muted">오늘({WEEKDAY_NAMES[now.weekday()]}요일) 운영시간을 기준으로 '
              '지금 문 연 약국을 알려드려요. 국립중앙의료원 공공데이터를 사용해요.</div>')
@@ -1965,7 +1975,7 @@ def render_app():
             context["최근_영수증"] = {"병원": r0.hospital, "날짜": r0.visit_date, "총진료비": int(r0.total_cost),
                                  "내가낸돈": int(r0.patient_pay), "비급여": int(r0.non_covered)}
         if not records_all.empty:
-            year_rows = records_all[records_all["visit_date"].str.startswith(str(dt.date.today().year))]
+            year_rows = records_all[records_all["visit_date"].str.startswith(str(today_kst().year))]
             context["올해_급여본인부담"] = int(year_rows["self_covered"].sum())
             context["올해_내가낸돈"] = int(year_rows["patient_pay"].sum())
         sel = ss.setdefault("faq_sel", FAQ[0]["id"])
